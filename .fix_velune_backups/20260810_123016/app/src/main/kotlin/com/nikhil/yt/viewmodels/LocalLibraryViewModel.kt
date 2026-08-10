@@ -169,13 +169,15 @@ class LocalLibraryViewModel @Inject constructor(
     fun refreshSelectedFolder() {
         val folder = _selectedFolder.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            _isRefreshingFolder.value = true
+            _isScanning.value = true
+            _currentScanningFolder.value = folder.id
             try {
                 repository.scanFolder(folder.id)
             } catch (e: Exception) {
                 Timber.e(e, "refreshSelectedFolder failed")
             } finally {
-                _isRefreshingFolder.value = false
+                _isScanning.value = false
+                _currentScanningFolder.value = null
             }
         }
     }

@@ -214,11 +214,21 @@ fun FolderDetailScreen(
 
             // ── Track List ───────────────────────────────────────────────────
             PullToRefreshBox(
-                isRefreshing = isRefreshingFolder,
+                isRefreshing = isScanning,
                 onRefresh = { viewModel.refreshSelectedFolder() },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                if (tracks.isEmpty()) {
+                if (isScanning) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            color = primary,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                } else if (tracks.isEmpty()) {
                     LocalEmptyState(
                         title = if (searchQuery.isNotBlank()) "No matches" else "No tracks",
                         subtitle = if (searchQuery.isNotBlank()) "Try a different search" else "Pull down to refresh",

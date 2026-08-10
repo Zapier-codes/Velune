@@ -811,4 +811,14 @@ class Migration19To20 : AutoMigrationSpec {
 @DeleteColumn.Entries(DeleteColumn(tableName = "song", columnName = "artistName"))
 class Migration20To21 : AutoMigrationSpec
 
+@DeleteTable.Entries(
+    DeleteTable(tableName = "local_track"),
+    DeleteTable(tableName = "local_folder")
+)
+class Migration28To29 : AutoMigrationSpec
+
+@DeleteTable.Entries(
+    DeleteTable(tableName = "local_track"),
+    DeleteTable(tableName = "local_folder")
+)
 class Migration28To29 : AutoMigrationSpec
