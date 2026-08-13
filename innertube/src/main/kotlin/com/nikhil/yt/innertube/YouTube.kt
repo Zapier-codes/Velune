@@ -1326,9 +1326,51 @@ object YouTube {
             thread.comment?.commentRenderer?.commentId?.let { id -> id to thread }
         }.toMap()
 
-        // 2. Extract Framework-based comments
+        // 2. Extract Framework-based comments and convert them into the same
+        // CommentThreadRenderer shape as legacy threads so both can be merged uniformly.
         val mutations = response.frameworkUpdates?.entityBatchUpdate?.mutations.orEmpty()
-        val commentsFromFramework = mutations.mapNotNull { it.payload?.commentEntityPayload }
+
+        val toolbarMap = mutations.mapNotNull { it.payload?.engagementToolbarStateEntityPayload }.associateBy { it.key }
+        val surfaceMap = mutations.mapNotNull { it.payload?.engagementToolbarSurfaceEntityPayload }.associateBy { it.key }
+
+        val frameworkThreadsMap = mutations.mapNotNull { mutation ->
+            mutation.payload?.commentEntityPayload?.let { payload ->
+                val commentId = payload.properties?.commentId ?: return@let null
+                val toolbarKey = payload.properties.toolbarStateKey
+                val surfaceKey = payload.properties.toolbarSurfaceKey
+                val toolbarState = toolbarMap[toolbarKey]
+                val surface = surfaceMap[surfaceKey]
+                val likeCount = payload.toolbar?.likeCountNotliked
+                    ?: surface?.toolbar?.likeCountNotliked
+                    ?: "0"
+
+                val syntheticRenderer = com.nikhil.yt.innertube.models.comment.CommentRenderer(
+                    authorText = com.nikhil.yt.innertube.models.Runs(
+                        runs = listOf(com.nikhil.yt.innertube.models.Run(text = payload.author?.displayName ?: "Unknown", navigationEndpoint = null))
+                    ),
+                    authorThumbnail = com.nikhil.yt.innertube.models.Thumbnails(
+                        thumbnails = listOf(com.nikhil.yt.innertube.models.Thumbnail(url = payload.author?.avatarThumbnailUrl ?: "", width = 0, height = 0))
+                    ),
+                    contentText = com.nikhil.yt.innertube.models.Runs(
+                        runs = listOf(com.nikhil.yt.innertube.models.Run(text = payload.properties.content?.content ?: "", navigationEndpoint = null))
+                    ),
+                    publishedTimeText = com.nikhil.yt.innertube.models.Runs(
+                        runs = listOf(com.nikhil.yt.innertube.models.Run(text = payload.properties.publishedTime ?: "", navigationEndpoint = null))
+                    ),
+                    commentId = commentId,
+                    voteCount = com.nikhil.yt.innertube.models.Runs(
+                        runs = listOf(com.nikhil.yt.innertube.models.Run(text = likeCount, navigationEndpoint = null))
+                    ),
+                    voteStatus = when (toolbarState?.likeState) {
+                        "TOOLBAR_LIKE_STATE_LIKE" -> "UPVOTE"
+                        "TOOLBAR_LIKE_STATE_INDIFFERENT" -> "INDIFFERENT"
+                        else -> "INDIFFERENT"
+                    }
+                )
+
+                commentId to CommentThreadRenderer(comment = CommentThreadRenderer.Comment(commentRenderer = syntheticRenderer))
+            }
+        }.toMap()
 
         // 3. Extract Next Token (Exhaustive Search)
         val nextToken = continuationItems.mapNotNull { item ->
@@ -1342,20 +1384,19 @@ object YouTube {
                 endpoint.appendContinuationItemsAction?.continuationItems?.mapNotNull { it.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token }
             }.flatten().firstOrNull()
 
-        // Merge Legacy and Framework comments
-        val frameworkCommentsMap = commentsFromFramework.associateBy { it.comment?.commentRenderer?.commentId }
-        val allIds = (legacyCommentsMap.keys + frameworkCommentsMap.keys).filterNotNull().distinct()
+        // Merge Legacy and Framework comments (both are now CommentThreadRenderer)
+        val allIds = (legacyCommentsMap.keys + frameworkThreadsMap.keys).filterNotNull().distinct()
 
-        val comments = allIds.mapNotNull { id ->
+        val comments: List<CommentThreadRenderer> = allIds.mapNotNull { id ->
             val legacy = legacyCommentsMap[id]
-            val modern = frameworkCommentsMap[id]
+            val modern = frameworkThreadsMap[id]
 
-            // Always prioritize the modern framework model because YouTube migrated text content exclusively to it.
-            // We've already injected `legacy.replies` into `modern` above.
-            if (modern != null) {
-                modern
-            } else {
-                legacy
+            // Always prioritize the modern framework model because YouTube migrated text content exclusively to it,
+            // but keep the legacy thread's `replies` pointer since the framework payload doesn't carry one.
+            when {
+                modern != null && legacy != null -> modern.copy(replies = legacy.replies)
+                modern != null -> modern
+                else -> legacy
             }
         }.distinctBy { it.comment?.commentRenderer?.commentId ?: it.hashCode() }
 
